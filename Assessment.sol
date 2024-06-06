@@ -1,61 +1,95 @@
-
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.9;
 
-//import "hardhat/console.sol";
-
 contract Assessment {
     address payable public owner;
-    uint256 public balance;
+    uint256 public contractBalance;
 
-    event Deposit(uint256 amount);
-    event Withdraw(uint256 amount);
+    struct Wallet {
+        address owner;
+        uint256 balance;
+    }
+
+    mapping(address => Wallet) private wallets;
+
+    event Deposit(address indexed walletOwner, uint256 amount);
+    event Withdraw(address indexed walletOwner, uint256 amount);
+    event Transfer(address indexed from, address indexed to, uint256 amount);
+    event WalletCreated(address indexed walletOwner);
 
     constructor(uint initBalance) payable {
         owner = payable(msg.sender);
-        balance = initBalance;
+        contractBalance = initBalance;
     }
 
-    function getBalance() public view returns(uint256){
-        return balance;
+    modifier onlyWalletOwner(address _walletOwner) {
+        require(msg.sender == _walletOwner, "You are not the owner of this wallet");
+        _;
     }
 
-    function deposit(uint256 _amount) public payable {
-        uint _previousBalance = balance;
+    function createWallet() public {
+        require(wallets[msg.sender].owner == address(0), "Wallet already exists for this address");
+        
+        wallets[msg.sender] = Wallet({
+            owner: msg.sender,
+            balance: 0
+        });
 
-        // make sure this is the owner
-        require(msg.sender == owner, "You are not the owner of this account");
-
-        // perform transaction
-        balance += _amount;
-
-        // assert transaction completed successfully
-        assert(balance == _previousBalance + _amount);
-
-        // emit the event
-        emit Deposit(_amount);
+        emit WalletCreated(msg.sender);
     }
 
-    // custom error
+    function getWalletBalance() public view returns (uint256) {
+        return wallets[msg.sender].balance;
+    }
+
+    function depositToWallet(uint256 _amount) public payable onlyWalletOwner(msg.sender) {
+        Wallet storage wallet = wallets[msg.sender];
+        uint _previousBalance = wallet.balance;
+
+        wallet.balance += _amount;
+        contractBalance += _amount;
+
+        assert(wallet.balance == _previousBalance + _amount);
+
+        emit Deposit(msg.sender, _amount);
+    }
+
     error InsufficientBalance(uint256 balance, uint256 withdrawAmount);
 
-    function withdraw(uint256 _withdrawAmount) public {
-        require(msg.sender == owner, "You are not the owner of this account");
-        uint _previousBalance = balance;
-        if (balance < _withdrawAmount) {
+    function withdrawFromWallet(uint256 _withdrawAmount) public onlyWalletOwner(msg.sender) {
+        Wallet storage wallet = wallets[msg.sender];
+        uint _previousBalance = wallet.balance;
+
+        if (wallet.balance < _withdrawAmount) {
             revert InsufficientBalance({
-                balance: balance,
+                balance: wallet.balance,
                 withdrawAmount: _withdrawAmount
             });
         }
 
-        // withdraw the given amount
-        balance -= _withdrawAmount;
+        wallet.balance -= _withdrawAmount;
+        contractBalance -= _withdrawAmount;
 
-        // assert the balance is correct
-        assert(balance == (_previousBalance - _withdrawAmount));
+        assert(wallet.balance == (_previousBalance - _withdrawAmount));
 
-        // emit the event
-        emit Withdraw(_withdrawAmount);
+        emit Withdraw(msg.sender, _withdrawAmount);
+    }
+
+    function transferFromWallet(address payable _to, uint256 _amount) public onlyWalletOwner(msg.sender) {
+        Wallet storage senderWallet = wallets[msg.sender];
+        Wallet storage receiverWallet = wallets[_to];
+
+        require(senderWallet.balance >= _amount, "Insufficient balance");
+
+        uint _previousSenderBalance = senderWallet.balance;
+        uint _previousReceiverBalance = receiverWallet.balance;
+
+        senderWallet.balance -= _amount;
+        receiverWallet.balance += _amount;
+
+        assert(senderWallet.balance == (_previousSenderBalance - _amount));
+        assert(receiverWallet.balance == (_previousReceiverBalance + _amount));
+
+        emit Transfer(msg.sender, _to, _amount);
     }
 }
